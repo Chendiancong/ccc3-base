@@ -21,16 +21,15 @@ export class NetworkHandler extends EventTarget implements ISchedulable {
 
     private _serverAddr: string;
     private _serverPort: number;
+    private _gatewayFlag: string;
     private _sendBuf: ByteArray;
     private _receiveBuf: ByteArray;
     private _webSocket: WebSocket;
 
     private _paused: boolean = false;
 
-    constructor () {
+    constructor() {
         super();
-
-        // cc.director.getScheduler().enableForTarget(this);
         this.id = 'NetworkHandler';
         this.uuid = getUuid();
         Scheduler.enableForTarget(this);
@@ -38,13 +37,14 @@ export class NetworkHandler extends EventTarget implements ISchedulable {
         this._receiveBuf = new ByteArray();
     }
 
-    public pause()  { this._paused = true; }
-    public resume() { this._paused = false;}
+    public pause() { this._paused = true; }
+    public resume() { this._paused = false; }
 
-    public init(ip: string, port: number): boolean {
+    public init(ip: string, port: number, gatewayFlag?: string): boolean {
         log(`net init ${ip}:${port}`);
         this._serverAddr = ip;
         this._serverPort = port;
+        this._gatewayFlag = gatewayFlag??'';
 
         this._webSocket = new WebSocket();
         this._webSocket.type = WebSocket.TYPE_BINARY;
@@ -56,11 +56,13 @@ export class NetworkHandler extends EventTarget implements ISchedulable {
     }
 
     public connect(): boolean {
-        log(`try to connect to ${this._serverAddr}:${this._serverPort}`);
+        log(`try to connect to ${this._serverAddr}:${this._serverPort}${this._gatewayFlag?`/${this._gatewayFlag}`:''}`);
         if (this.iswss) {
-            this._webSocket.connectByUrl("wss://" + this._serverAddr + ":" + this._serverPort);
+            // this._webSocket.connectByUrl("wss://" + this._serverAddr + ":" + this._serverPort);
+            this._webSocket.connectByUrl(`wss://${this._serverAddr}:${this._serverPort}${this._gatewayFlag?`/${this._gatewayFlag}`:''}`);
         } else {
-            this._webSocket.connect(this._serverAddr, this._serverPort);
+            // this._webSocket.connect(this._serverAddr, this._serverPort);
+            this._webSocket.connectByUrl(`ws://${this._serverAddr}:${this._serverPort}`);
         }
         return true;
     }
@@ -76,9 +78,14 @@ export class NetworkHandler extends EventTarget implements ISchedulable {
             this._webSocket.off("close", this._onClosed, this);
             this._webSocket.off("ioError", this._onError, this);
             this._webSocket.close();
-            // cc.director.getScheduler().unscheduleUpdate(<any>this);
             director.getScheduler().unscheduleUpdate(this);
         }
+    }
+
+    public reConnect() {
+        log("do reConnect");
+        this.reset();
+        this.init(this._serverAddr, this._serverPort);
     }
 
     public resetAddr(ip: string, port: number) {
@@ -94,10 +101,11 @@ export class NetworkHandler extends EventTarget implements ISchedulable {
     }
 
     private _onConnected() {
+        this._sendBuf.clear();
         log(`connected to ${this._serverAddr}:${this._serverPort}`);
         director.getScheduler().unscheduleUpdate(this);
         director.getScheduler().scheduleUpdate(this, 0, false);
-        this.emit("connect")
+        this.emit("connect");
     }
 
     private _onData() {
@@ -128,14 +136,12 @@ export class NetworkHandler extends EventTarget implements ISchedulable {
     update() {
         if (!this._paused) {
             let size = this._getSendBufferSize();
-            if (size >= NetworkHandler.HEAD_SIZE)
-            {
+            if (size >= NetworkHandler.HEAD_SIZE) {
                 this._webSocket.writeBytes(this._sendBuf);
                 this._sendBuf.clear();
             }
             let bConsumed: boolean = false;
-            while (this._receiveBuf.readAvailable >= NetworkHandler.HEAD_SIZE)
-            {
+            while (this._receiveBuf.readAvailable >= NetworkHandler.HEAD_SIZE) {
                 let len = this._receiveBuf.readUnsignedShort();
                 let seq = this._receiveBuf.readUnsignedShort();
                 let cmd = this._receiveBuf.readUnsignedInt();
@@ -143,15 +149,10 @@ export class NetworkHandler extends EventTarget implements ISchedulable {
                     this._receiveBuf.position -= NetworkHandler.HEAD_SIZE;
                     break;
                 }
-
-                // let buffer = new ByteArray();
-                // let buffer = ObjectPool.pop(ByteArray);
-                // buffer.position = 0;
-                // buffer.length = 0;
                 let buffer = bufferPool.get();
                 if (len != 0)
                     this._receiveBuf.readBytes(buffer, 0, len);
-                
+
                 bConsumed = true;
                 this.emit("onSocketData", {
                     cmd: cmd,

@@ -2,23 +2,21 @@ import { autoProperty } from "../base/base-decorator";
 import { applyMixins } from "../base/jsUtil";
 import { MessageCenter } from "./MessageCenter";
 
-export class ObserverClass
-{
-    @autoProperty(function() { return []; })
+export class ObserverClass {
+    @autoProperty(function () { return []; })
     _observed;
-
-    public observe(obj: any, func: Function, handleFunc: Function, thiz = this) {
+    public observe(obj: any, func: Function, handleFunc: Function, thiz = this, exception?: boolean) {
         let idx: number;
         if ((idx = this.getObserveIndex(obj, func)) >= 0) {
             let o = this._observed[idx];
             MessageCenter.removeListener(o[0], o[1], o[2], o[3]);
-
             o[0] = obj;
             o[1] = func;
             o[2] = handleFunc;
             o[3] = thiz;
+            o[4] = exception;
         } else {
-            this._observed.push([obj, func, handleFunc, thiz]);
+            this._observed.push([obj, func, handleFunc, thiz, exception]);
         }
 
         return MessageCenter.addListener(obj, func, handleFunc, thiz);
@@ -40,8 +38,24 @@ export class ObserverClass
         for (let each of this._observed) {
             MessageCenter.removeListener(each[0], each[1], each[2], each[3]);
         }
-
         this._observed = [];
+    }
+
+
+    public unuseObserves() {
+        for (let each of this._observed) {
+            if (!each[4]) {
+                MessageCenter.removeListener(each[0], each[1], each[2], each[3]);
+            }
+        }
+    }
+
+    public reuseObserves() {
+        for (let each of this._observed) {
+            if (!each[4]) {
+                MessageCenter.addListener(each[0], each[1], each[2], each[3]);
+            }
+        }
     }
 
     public getObserveIndex?(obj: any, func: Function) {

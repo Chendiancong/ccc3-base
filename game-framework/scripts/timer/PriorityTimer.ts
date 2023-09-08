@@ -1,4 +1,4 @@
-import { director } from "cc";
+import { director, game } from "cc";
 import { assert } from "../base/debugUtil";
 
 export interface IPriorityTimerHandler {
@@ -23,11 +23,11 @@ export class PriorityTimer {
     private _toDeleteCurrentHandler: boolean;
 
     init() {
-        this._currentTime = director.getTotalTime();
+        this._currentTime = game.totalTime;
     }
 
     update(dt: number): boolean {
-        this._currentTime = director.getTotalTime();
+        this._currentTime = game.totalTime;
         for (let i = this._nextFrameHandlers.length; i--;) {
             let handler = this._nextFrameHandlers[i];
             handler.method.call(handler.methodObj);

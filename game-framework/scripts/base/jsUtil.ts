@@ -20,7 +20,8 @@ export let setPrototypeOf =
 export function applyMixins(derivedCtor: any, baseCtors: any[]) {
     baseCtors.forEach((baseCtor) => {
         Object.getOwnPropertyNames(baseCtor.prototype).forEach((name) => {
-            if (name !== "constructor" && !(name in derivedCtor.prototype))
+            // if (name !== "constructor" && !(name in derivedCtor.prototype))
+            if (name !== "constructor" && !Object.getOwnPropertyDescriptor(derivedCtor.prototype, name))
                 Object.defineProperty(
                     derivedCtor.prototype,
                     name,
@@ -92,7 +93,7 @@ export function isEmpty(obj: any) {
 /**
  * 元素按顺序插入数据 插入排序
  */
-export function arrayInsert<T>(
+export function insertSort<T>(
     arr: T[],
     element: T,
     sort: (a: T, b: T) => number
@@ -117,4 +118,21 @@ export function arrayRemove<T>(array: T[], element: T) {
         j++;
     }
     array.length = i;
+}
+
+/**
+ * 元素按顺序插入数据 插入排序
+ */
+export function arrayInsert<T>(
+    arr: T[],
+    element: T,
+    sort: (a: T, b: T) => number
+) {
+    let i = arr.length;
+    arr.push(element);
+    while (i != 0 && sort(arr[i - 1], element) > 0) {
+        arr[i] = arr[i - 1];
+        i--;
+    }
+    arr[i] = element;
 }

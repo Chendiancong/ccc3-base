@@ -1,11 +1,13 @@
-import { js } from "cc";
+import { director, isValid, js, Node } from "cc";
+import { DEBUG } from "cc/env";
 import { MessageCenter } from "../events/MessageCenter";
 import { applyMixins } from "./jsUtil";
 import { ISystemRegisterInfo, systemMgr } from "./SystemMgr";
 
 function gameSystemHelper(prop: ISystemRegisterInfo, classConstructor: any) {
     let className = prop.className;
-    js.setClassName(className, classConstructor);
+    if (!DEBUG)
+        js.setClassName(className, classConstructor);
 
     prop = prop || <any>{};
     prop.clazz = classConstructor;
@@ -25,7 +27,8 @@ export function gameSystem(param: any) {
 
 function gameSubSystemHelper(prop: ISystemRegisterInfo, classConstructor: any) {
     let className = prop.className;
-    js.setClassName(className, classConstructor);
+    if (!DEBUG)
+        js.setClassName(className, classConstructor);
     MessageCenter.compile(classConstructor);
 }
 
@@ -158,7 +161,7 @@ function _autoProperty(clazzOrProto: any, propertyName: string, initial?: (() =>
             this[internalKey] = value;
         },
         configurable: true,
-        enumerable: true
+        enumerable: true,
     }
     return desc as any;
 }
@@ -171,4 +174,36 @@ export function autoProperty(p1: any, p2?: any) {
         return function (clazzOrProto: any, propertyName: string) {
             return _autoProperty(clazzOrProto, propertyName, p1);
         }
+}
+
+export function singleton(clazz: any, propertyName: string) {
+    if (clazz.prototype == void 0)
+        throw new Error('static property is required');
+    return _autoProperty(
+        clazz,
+        propertyName,
+        () => new clazz()
+    );
+}
+
+export function componentSingleton(clazz: any, propertyName: string) {
+    if (clazz.prototype == void 0)
+        throw new Error('static property is required');
+    let node: Node
+    const internalKey = `_${propertyName}`;
+    let desc: PropertyDescriptor = {
+        get: function () {
+            if (!isValid(node)) {
+                node = new Node(clazz.name??'compSingleton');
+                node.parent = director.getScene();
+                this[internalKey] = node.addComponent(clazz);
+            }
+            return this[internalKey];
+        },
+        set: function (_: any) {
+            throw new Error('set component singleton is forbidden');
+        }
+    }
+
+    return desc as any;
 }

@@ -5,6 +5,8 @@ import { EventTarget, director, game, Scheduler, ISchedulable, Game, macro } fro
 import { DEBUG } from "cc/env";
 import { log } from "../base/debugUtil";
 import { getUuid } from "../base/uuid";
+// import { EnumGameAppState, GameAppState } from "../../../first-scene/scripts/GameAppState";
+// import { kGameIternalOpenUIEvents } from "../../../first-scene/scripts/FirstSceneConst";
 
 export class NetEvent extends CustomEvent {
     public cmd: number;
@@ -25,25 +27,24 @@ interface INetPendingCallback {
     startTime: number,
     success: Function,
     failure: Function,
-    noLayer: boolean
 }
 
 export let NET_DEBUG = DEBUG;
-var P; // Protocal
+//Protocol
+let innerP: any;
 
 export class GameNet extends EventTarget implements ISchedulable {
     private _cmd2Protocol: { [cmd: number]: string } = {};
     private _pendingCallbacks: { [seq: number]: INetPendingCallback } = {};
     private _timeoutCallBacks: { [seq: number]: INetPendingCallback } = {};
 
-    private _reconnecting: boolean = false;
-    private _reconnectTimes: number = 0;
-
     private _keepAliveRecord: { seq: number, time: number }[] = [];
 
     private _protobufReader: any = (<any>window).protobuf.Reader.create(new Uint8Array(0));
     private _protobufWriter: any = (<any>window).protobuf.Writer.create();
 
+    public c2sLogFilters: { [cmd: number]: true } = {};
+    public s2cLogFilters: { [cmd: number]: true } = {};
     public network: NetworkHandler;
     public id?: string;
     public uuid?: string;
@@ -53,89 +54,98 @@ export class GameNet extends EventTarget implements ISchedulable {
         return function () {
             if (seq > 0xFFFE)
                 seq = 0;
-
             return ++seq;
         }
     }();
     private _timeoutTimer: number;
     private _gameShowTimer: number;
 
+    private _tryConnectCnt: number = 0;
+
     public constructor() {
         super();
-
-        // director.getScheduler().enableForTarget(this);
         this.id = 'GameNet';
         this.uuid = getUuid();
         Scheduler.enableForTarget(this);
-
         this._initCmd2Protocol();
-
         let ins = this.network = new NetworkHandler();
         ins.on("onSocketData", this._onSocketData, this);
-        ins.on("connect", () => {
-            this._keepAlive();
-            if (this._reconnecting) {
-                this._removeReconnectTimer();
-                this._hideWaitLayer();
-                this._reconnectTimes = 0;
-
-                if (this.relogin) {
-                    this.relogin(() => {
-                        log("connect reestablished");
-                        this.emit("connectReestablished", true);
-                        this._reconnecting = false;
-                    }, () => {
-                        this.emit("connectReestablished", false);
-                        this._reconnecting = false;
-                    });
-                } else {
-                    log("connect reestablished");
-                    this.emit("connectReestablished", true);
-                    this._reconnecting = false;
-                }
-            } else {
-                this.emit("connect");
-            }
-        }, this);
-
+        ins.on("connect", this._connetedFun, this);
         ins.on("ioError", function () {
-            this._reconnecting = false;
             this.emit("ioError");
+            this._showWaitLayer("ioError");
         }, this);
 
         ins.on("close", function () {
-            this._reconnecting = false;
             this.emit("close");
+            this._showWaitLayer("close");
+            // if (gameInternal.appState.curState === EnumGameAppState.Loading) {
+            //     gFramework.globalEvent.emit(kGameIternalOpenUIEvents.NET_LOST);
+            // }
+        }, this);
+
+        ins.on("connectionLost", function () {
+            this.emit("connectionLost");
+            this._showWaitLayer("connectionLost");
         }, this);
 
         let func = () => {
             this._checkTimeOut();
-            this._timeoutTimer = setTimeout(func, 500);
+            this._timeoutTimer = <any>setTimeout(func, 500);
         }
-        this._timeoutTimer = setTimeout(func, 500);
+        this._timeoutTimer = <any>setTimeout(func, 500);
 
+        Object.assign(this.c2sLogFilters, _c2sFilters);
+        Object.assign(this.s2cLogFilters, _s2cFilters);
+
+        game.on(Game.EVENT_HIDE, this._onGameHide, this);
         game.on(Game.EVENT_SHOW, this._onGameShow, this);
     }
 
     private _initCmd2Protocol(): void {
-        let _P = P;
+        let _P = innerP;
         for (let key in _P) {
             if (_P[key].cmd)
                 this._cmd2Protocol[_P[key].cmd] = key;
         }
     }
 
+    private _onGameHide() {
+        log("on hide!!!");
+        this._pauseTryToSilentConnect = true;
+    }
+
     private _onGameShow() {
         log("on show!!!");
-        this._gameShowTimer = setTimeout(() => {
+        this._pauseTryToSilentConnect = false;
+        this._gameShowTimer = <any>setTimeout(() => {
             this._gameShowTimer = null;
-            if (!this.network.connected())
-                this._reconnect();
+            if (!this.network.connected()) {
+                this.tryToSilentConnect();
+            }
         }, 500);
     }
 
+    private _duplicate(source: any) {
+        if (source == void 0)
+            return source;
+        if (typeof source === "object") {
+            if (Array.isArray(source)) {
+                return (source as Array<any>).map(v => this._duplicate(v));
+            } else {
+                const propNames = Object.getOwnPropertyNames(source);
+                const target = {};
+                for (const pname of propNames)
+                    target[pname] = this._duplicate(source[pname]);
+                return target;
+            }
+        } else {
+            return source;
+        }
+    }
+
     private _onSocketData(data: { cmd: number, seq: number, buf: ByteArray }) {
-        let _P = P;
+        let _P = innerP;
 
         let cmd = data.cmd;
         let seq = data.seq;
@@ -147,13 +157,10 @@ export class GameNet extends EventTarget implements ISchedulable {
             return;
         }
         let msg: any = _P[protocolStr].decode(this._createReader(buf.buffer));
-        // buf.position = 0;
-        // buf.length = 0;
-        // ObjectPool.push(buf);
         bufferPool.put(buf);
-
-        if (NET_DEBUG && cmd != P.net_heart_s2c.cmd && cmd != _P.public_success_s2c.cmd)
-            log(`received ${protocolStr} seq: ${seq} data:`, msg.toJSON());
+        if (NET_DEBUG && !this.s2cLogFilters[cmd]) {
+            log(`received ${protocolStr} seq: ${seq} data:`, this._duplicate(msg));
+        }
 
         let pending = this._pendingCallbacks[seq];
         if (pending) {
@@ -189,11 +196,7 @@ export class GameNet extends EventTarget implements ISchedulable {
             netEvent.cmd = cmd;
             netEvent.seq = seq;
             netEvent.msg = msg;
-            // try {
             this.emit(protocolStr, netEvent);
-            // } catch (err) {
-            //     error(err);
-            // }
             netEvent.msg = undefined;
             CustomEvent.release(netEvent);
         } else if (cmd == _P.net_heart_s2c.cmd) {
@@ -216,50 +219,43 @@ export class GameNet extends EventTarget implements ISchedulable {
         } else if (cmd != _P.public_success_s2c.cmd) {
             log(`${protocolStr} hasn't listener`);
         }
-
         for (let _ in this._pendingCallbacks)
             return;
-
         this._hideWaitLayer();
     }
 
     private _checkTimeOut() {
-        let hasLayer = false;
         let now = Date.now();
         for (let seq in this._pendingCallbacks) {
             let pending = this._pendingCallbacks[seq];
             if (pending.timeout <= now) {
                 this._timeoutCallBacks[seq] = pending;
-            } else {
-                if (!pending.noLayer) {
-                    hasLayer = true;
-                }
             }
         }
-
         for (let seq in this._timeoutCallBacks) {
             let pending = this._timeoutCallBacks[seq];
             delete this._timeoutCallBacks[seq];
             delete this._pendingCallbacks[seq];
             if (pending.failure) {
-                log(`seq: ${seq} TimeOut`);
-                pending.failure(100);
+                log(`seq: ${seq} TimeOut ` + Net.getServerTimeSec());
             }
         }
-
-        if (!hasLayer)
-            this._hideWaitLayer();
-
         if (this._keepAliveRecord.length) {
             let invalidRecordCount: number = 0;
             let now = Date.now();
             for (let record of this._keepAliveRecord) {
-                if (record.time + 6000 <= now) {
+                if (record.time + 5000 <= now) {
                     invalidRecordCount++;
                 }
             }
-            if (invalidRecordCount >= 2)
-                this.emit("netHeartBlock");
+            if (invalidRecordCount >= 2) {
+                if (!this._reConnecting) {
+                    this.emit("netHeartBlock");
+                    gFramework.warn("netHeartBlock");
+                    this._reConnecting = true;
+                    this._doReLoadConnect();
+                }
+            }
         }
     }
 
@@ -274,30 +270,33 @@ export class GameNet extends EventTarget implements ISchedulable {
     public send(request: any, data?: any) {
         let seq = this._nextSeq();
         let cmd = request.cmd;
-
-        if (NET_DEBUG && cmd != P.net_heart_c2s.cmd)
-            log(`send ${this._cmd2Protocol[cmd]} seq: ${seq}`, data ? "data:" : "", data || "");
-
+        if (NET_DEBUG && !this.c2sLogFilters[cmd]) {
+            log(`send ${this._cmd2Protocol[cmd]} seq: ${seq}`, data ? "data: " : "", data || "");
+        }
         if (this.network.connected()) {
             this._protobufWriter.reset();
             let w = request.encode(data, this._protobufWriter);
             let buffer = w.finish();
             this.network.send(seq, cmd, buffer, w.len);
         } else {
-            this._reconnect();
+            if (NET_DEBUG && this.c2sLogFilters[cmd]) {
+                log(`send ${this._cmd2Protocol[cmd]} seq: ${seq}`, data ? "data: " : "", data || "");
+            }
+            this._gameShowTimer = <any>setTimeout(() => {
+                this._gameShowTimer = null;
+                if (!this.network.connected()) {
+                    this.tryToSilentConnect();
+                }
+            }, 500);
         }
-
         return seq;
     }
 
-    public call(request: any, data?: any, success?: INetSuccessCallback, failure?: INetFailureCallback, thiz?: any, timeout: number = 6000) {
+    public call(request: any, data?: any, success?: INetSuccessCallback, failure?: INetFailureCallback, thiz?: any, timeout: number = 5000) {
         let seq = this.send(request, data);
-        let noWaitLayer = false;
         if (timeout < 0) {
-            noWaitLayer = true;
             timeout = -timeout;
         }
-
         let now = Date.now();
         let pendingCallback: INetPendingCallback = {
             timeout: now + timeout,
@@ -309,105 +308,166 @@ export class GameNet extends EventTarget implements ISchedulable {
             failure: function (...args: any[]) {
                 if (failure)
                     failure.apply(thiz, args);
-            },
-            noLayer: noWaitLayer
+            }
         };
         this._pendingCallbacks[seq] = pendingCallback;
-        if (!noWaitLayer)
-            this._showWaitLayer();
         return seq;
     }
 
-    private _reconnectTimer: boolean = false;
-    private _reconnect() {
+    private _pauseTryToSilentConnect: boolean = false;
+    private _silentConnectTimer: boolean = false;
+    /** 尝试静默重连  */
+    tryToSilentConnect() {
+        // todo check playing
+        // if (gameInternal.appState.curState !== EnumGameAppState.Play) return;
+        if (this._reConnecting) return;
+        if (this._pauseTryToSilentConnect || this._rejectConnected) {
+            this._removeSilentConnectTimer();
+            return;
+        }
         if (!this._noMoreConnected) {
-            if (this._reconnecting) {
+            if (!this._silentConnectTimer) {
+                log("*****enter silentConnect..");
+                this._silentConnectTimer = true;
+                director.getScheduler().schedule(this._silentConnectUpdate, <any>this, 3, macro.REPEAT_FOREVER, 0, false);
+            }
+        }
+    }
+
+    private _silentConnectUpdate() {
+        if (!this.network.connected()) {
+            if (this._tryConnectCnt <= 4) {
+                log("*****silentConnect " + (this._tryConnectCnt + 1) + " times");
+                this._keepAlive();
                 this.network.connect();
+                this._tryConnectCnt++;
             } else {
-                this._doReconnect();
-
-                if (!this._reconnectTimer) {
-                    this._reconnectTimer = true;
-
-                    director.getScheduler().schedule(this._reconnectUpdate, <any>this, 1, macro.REPEAT_FOREVER, 0, false);
-                    this.emit("connectionLost");
-                }
+                this._doReLoadConnect();
             }
-        }
-    }
-
-    private _removeReconnectTimer() {
-        if (this._reconnectTimer) {
-            this._reconnectTimer = false;
-            director.getScheduler().unschedule(this._reconnectUpdate, <any>this);
-        }
-    }
-
-    private _reconnectUpdate() {
-        this._reconnectTimes++;
-        if (this.network.connected()) {
-            this._removeReconnectTimer();
         } else {
-            if (this._reconnectTimes >= 8) {
-                this._removeReconnectTimer();
-                this._reconnectTimes = 0;
-            }
+            this._removeSilentConnectTimer();
         }
     }
 
-    private _doReconnect() {
-        log("reconnect");
-        this._reconnecting = true;
-        this.network.connect();
+    doTheReConnect() {
+        this.network.reConnect();
     }
 
-    private _showWaitLayer() {
-        // viewManager.openNetWaitUI();
+    /** 是否重连中 */
+    private _reConnecting: boolean;
+
+    /** 连上 */
+    private _connetedFun() {
+        if (this._silentConnectTimer) {
+            log("*****silentConnect  success..");
+            this._removeSilentConnectTimer();
+            this._reConnetFun();
+        } else {
+            this._reConnecting = false;
+            this._tryConnectCnt = 0;
+        }
+        this._keepAlive();
+        this.emit("connect");
+    }
+
+    /** 重连 */
+    private _reConnetFun() {
+        if (this._noMoreConnected || this._reConnecting) return;
+        if (this.reconnect) {
+            this._reConnecting = true;
+            this._keepAlive();
+            this.reconnect(() => {
+                this._hideWaitLayer();
+                this._tryConnectCnt = 0;
+                this._reConnecting = false;
+            }, () => {
+                this._showWaitLayer("reConnet fail");
+                this._reConnecting = false;
+            });
+        } else {
+            this._hideWaitLayer();
+        }
+    }
+
+    /** 重登 */
+    private _doReLoadConnect() {
+        log("*****doRelogin~~！");
+        this.emit("connectReestablished", true);
+        this._removeSilentConnectTimer();
+        if (this.relogin) {
+            this._reConnecting = true;
+            this._keepAlive();
+            this.relogin(() => {
+                log("relogin success");
+                this._hideWaitLayer();
+                this._reConnecting = false;
+            }, () => {
+                log("relogin fail");
+                this._hideWaitLayer();
+                this._reConnecting = false;
+                this.emit("connectionLost");
+            });
+        }
+    }
+
+    private _removeSilentConnectTimer() {
+        if (this._silentConnectTimer) {
+            this._silentConnectTimer = false;
+            director.getScheduler().unschedule(this._silentConnectUpdate, <any>this);
+        }
+    }
+
+    private _showWaitLayer(reason: string) {
+        gFramework.globalEvent.emit("openNetLostWaitUI", true, reason);
+        gameNet.tryToSilentConnect();
     }
 
     private _hideWaitLayer() {
-        // viewManager.closeNetWaitUI();
+        gFramework.globalEvent.emit("openNetLostWaitUI", false);
     }
 
     public initServerTime(callback?: Function, failure?: Function) {
         if (this._serverDTime)
             if (callback) callback();
         let now = Date.now();
-        this.call(P.net_heart_c2s, undefined, (evt: NetEvent) => {
-            let _now = Date.now();
-            let diff = _now - now;
-            let msg/*: P.Inet_heart_s2c*/ = evt.msg;
-            this._serverDTime = Math.floor(0.5 + (Number(msg.nowMs) + 0.5 * diff - _now));
-            this._netDelay = diff;
-            if (callback)
-                callback();
-        }, function (code) {
-            log(`request failed (${code})`);
-            if (failure)
-                failure(code);
-        });
+        // todo
+        // this.call(P.net_heart_c2s, undefined, (evt: NetEvent) => {
+        //     let _now = Date.now();
+        //     let diff = _now - now;
+        //     let msg/*: P.Inet_heart_s2c*/ = evt.msg;
+        //     this._serverDTime = Math.floor(0.5 + (Number(msg.nowMs) + 0.5 * diff - _now));
+        //     this._netDelay = diff;
+        //     if (callback)
+        //         callback();
+        // }, function (code) {
+        //     log(`request failed (${code})`);
+        //     if (failure)
+        //         failure(code);
+        // });
     }
 
     private _keepAliveTimer: boolean = false;
     private _keepAlive() {
+        this.noMoreConnected = false;
         let scheduler = director.getScheduler();
         if (this._keepAliveTimer) {
             scheduler.unschedule(this._keepAliveUpdate, <any>this);
             this._keepAliveTimer = false;
             this._keepAliveRecord.length = 0;
         }
-
         this._keepAliveTimer = true;
         scheduler.schedule(this._keepAliveUpdate, <any>this, 10, macro.REPEAT_FOREVER, 0, false);
+        this._keepAliveUpdate();
     }
 
     private _keepAliveUpdate() {
-        let seq = this.send(P.net_heart_c2s);
-        let now = Date.now();
-        let arr = this._keepAliveRecord;
-        arr.push({ seq: seq, time: now });
-        if (arr.length >= 15)
-            arr.splice(0, 6);
+        // todo
+        // let seq = this.send(P.net_heart_c2s);
+        // let now = Date.now();
+        // let arr = this._keepAliveRecord;
+        // arr.push({ seq: seq, time: now });
+        // if (arr.length >= 15)
+        //     arr.splice(0, 6);
     }
 
     private _createReader(buf: ArrayBuffer) {
@@ -443,12 +503,24 @@ export class GameNet extends EventTarget implements ISchedulable {
     public set noMoreConnected(b: boolean) {
         this._noMoreConnected = b;
         if (b) {
-            this._keepAliveRecord.length = 0;
+            director.getScheduler().unschedule(this._keepAliveUpdate, <any>this);
+        }
+    }
+
+    private _rejectConnected: boolean;
+    public set rejectConnected(b: boolean) {
+        this._rejectConnected = b;
+        if (b) {
+            this.noMoreConnected = true;
+            director.getScheduler().unschedule(this._silentConnectUpdate, <any>this);
             director.getScheduler().unschedule(this._keepAliveUpdate, <any>this);
         }
     }
 
     public relogin?(success: Function, failure: Function): void;
+
+    public reconnect?(success: Function, failure: Function): void;
+
     public dispose() {
         if (this._timeoutTimer != null) {
             clearTimeout(this._timeoutTimer);
@@ -469,9 +541,43 @@ export function enable(iswss: boolean = false) {
     }
 }
 
-export function init(ip: string, port: number) {
+export function init(ip: string, port: number, gateway_flag: string) {
     gameNet.network.reset();
-    gameNet.network.init(ip, port);
+    gameNet.network.init(ip, port, gateway_flag);
+}
+
+export function setProtocol(protocol: any) {
+    innerP = protocol;
+}
+
+let _c2sFilters = {};
+export function addC2sLogFilter(cmd: number) {
+    if (gameNet)
+        gameNet.c2sLogFilters[cmd] = true;
+    else
+        _c2sFilters[cmd] = true;
+}
+
+export function delC2sLogFilter(cmd: number) {
+    if (gameNet)
+        delete gameNet.c2sLogFilters[cmd];
+    else
+        delete _c2sFilters[cmd];
+}
+
+let _s2cFilters = {};
+export function addS2cLogFilter(cmd: number) {
+    if (gameNet)
+        gameNet.s2cLogFilters[cmd] = true;
+    else
+        _s2cFilters[cmd] = true;
+}
+
+export function delS2cLogFilter(cmd: number) {
+    if (gameNet)
+        delete gameNet.s2cLogFilters[cmd];
+    else
+        delete _s2cFilters[cmd];
 }
 
 export function disable() {
@@ -507,6 +613,10 @@ export function removeEventListener(
     thisObject?: any
 ) {
     gameNet.off(type, listener as any, thisObject);
+}
+
+export function targetOff(target: any) {
+    gameNet.targetOff(target);
 }
 
 export function send(request: any, data?: any) {
@@ -553,17 +663,28 @@ export function noMoreConnect(value: boolean) {
         gameNet.noMoreConnected = value;
 }
 
+export function rejectConnect(value: boolean) {
+    if (gameNet)
+        gameNet.rejectConnected = value;
+}
+
+
 export function setRelogin(relogin: (success: Function, failure: Function) => void) {
     gameNet.relogin = relogin;
 }
+
+export function setReconnect(reconnect: (success: Function, failure: Function) => void) {
+    gameNet.reconnect = reconnect;
+}
+
 
 export function connected() {
     return gameNet ? gameNet.network.connected() : false;
 }
 
-export function initAsync(ip: string, port: number) {
+export function initAsync(ip: string, port: number, gateway_flag?: string) {
     return new Promise<void>(function (resolve, reject) {
-        init(ip, port);
+        init(ip, port, gateway_flag);
         function unregister() {
             removeEventListener("connect", onConnect, null);
             removeEventListener("connectReestablished", onConnect, null);
@@ -603,26 +724,26 @@ export function acall(request: any, data?: any, time?: number): Promise<any> {
 
 export const kSaveACallRetSuccess = 1;
 export const kSaveACallRetFailure = 0;
-export function save_acall<T = any>(request: any, data?: any, time?: number): Promise<{result: number, msg: T, code: number}> {
+export function save_acall<T = any>(request: any, data?: any, time?: number): Promise<{ result: number, msg: T, code: number }> {
     return acall(request, data, time)
         .then(
             (msg) => {
-                return {result: kSaveACallRetSuccess, msg: msg, code: 0};
+                return { result: kSaveACallRetSuccess, msg: msg, code: 0 };
             },
             (code) => {
-                return {result: kSaveACallRetFailure, msg: null, code: code};
+                return { result: kSaveACallRetFailure, msg: null, code: code };
             }
-        ) as Promise<{result: number, msg: T, code: number}>
+        ) as Promise<{ result: number, msg: T, code: number }>
 }
 
 export function create_save_reject(code: number = 0) {
-    return Promise.resolve({result: kSaveACallRetFailure, msg: null, code: code})
+    return Promise.resolve({ result: kSaveACallRetFailure, msg: null, code: code })
 }
 
 export function gm(cmd: string) {
-    send(P.chat_world_c2s, { parts: [{ content: '=' + cmd }] });
+    // if (gFramework.useGM) send(P.chat_world_c2s, { parts: [{ content: '=' + cmd }] });
 }
 
 export function gmc(cmd: string) {
-    return acall(P.chat_world_c2s, { parts: [{ content: '=' + cmd }] });
+    // if (gFramework.useGM) return acall(P.chat_world_c2s, { parts: [{ content: '=' + cmd }] });
 }

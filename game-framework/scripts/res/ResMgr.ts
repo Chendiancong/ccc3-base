@@ -1,6 +1,5 @@
 import { Asset, assetManager, AssetManager, resources, SceneAsset } from "cc";
-import { asDelegate, IDelegate } from "../core/utils/Delegate";
-import { ResHolder } from "./resHolder";
+import { IDelegate, asDelegate } from "../base/Delegate";
 
 interface IResRequestBase { }
 
@@ -35,10 +34,8 @@ function promisefy(fn: Function) {
 }
 
 let aloadBundle = promisefy(assetManager.loadBundle.bind(assetManager));
-let resHolder = new ResHolder();
 
 export class ResMgr {
-    resHolder: ResHolder = resHolder;
     bundles: { [name: string]: AssetManager.Bundle } = {};
     defaultBundle: AssetManager.Bundle = resources;
 
@@ -350,30 +347,33 @@ export class ResRequest<T extends Asset> implements IResRequestBase {
         this.onProgress.clear();
     }
 
+    /**
+     * @deprecated
+     */
     private _saveAsset() {
-        switch (this.reqType) {
-            case ResRequestType.Normal:
-                {
-                    if (this.url instanceof Array) {
-                        let urls = <string[]>this.url;
-                        for (let i = 0, len = Math.min(this.allAssets.length, urls.length); i < len; ++i) {
-                            resHolder.add(this.allAssets[i], urls[i]);
-                        }
-                    } else {
-                        resHolder.add(this.allAssets[0], <string>this.url);
-                    }
-                }
-                break;
-            case ResRequestType.Directory:
-                {
-                    let url = <string>this.url;
-                    for (let i = 0, len = this.allAssets.length; i < len; ++i) {
-                        let asset = this.allAssets[i];
-                        resHolder.add(asset, `${url}/${asset.name}`);
-                    }
-                }
-                break;
-        }
+        // switch (this.reqType) {
+        //     case ResRequestType.Normal:
+        //         {
+        //             if (this.url instanceof Array) {
+        //                 let urls = <string[]>this.url;
+        //                 for (let i = 0, len = Math.min(this.allAssets.length, urls.length); i < len; ++i) {
+        //                     resHolder.add(this.allAssets[i], urls[i]);
+        //                 }
+        //             } else {
+        //                 resHolder.add(this.allAssets[0], <string>this.url);
+        //             }
+        //         }
+        //         break;
+        //     case ResRequestType.Directory:
+        //         {
+        //             let url = <string>this.url;
+        //             for (let i = 0, len = this.allAssets.length; i < len; ++i) {
+        //                 let asset = this.allAssets[i];
+        //                 resHolder.add(asset, `${url}/${asset.name}`);
+        //             }
+        //         }
+        //         break;
+        // }
     }
 
     private _progressCallback(finished: number, total: number, _: any) {

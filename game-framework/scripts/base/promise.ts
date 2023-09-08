@@ -1,4 +1,4 @@
-export function defer<T>() {
+export function defer<T>(): gFramework.PromiseDefer<T> {
     let resolve: (param: T) => void, reject;
     let promise = new Promise<T>(function () {
         resolve = arguments[0];

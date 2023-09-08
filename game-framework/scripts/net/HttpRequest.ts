@@ -1,25 +1,26 @@
+import { defer } from "../base/promise";
+
+export type AjaxOption = {
+    url: string,
+    /** 是否为异步请求 */
+    async?: boolean,
+    success?: Function,
+    failure?: Function,
+    dataType?: "text"|"json",
+    headers?: Record<string, string>,
+}
+
 /**
  * ajax请求
- * @param {String|Object} url 要请求的网址和参数
- * @param {Function} success 成功的回调函数
- * @param {Function} error 失败的回调函数
- * @param {String} dataType 类型 text json
- * @param {Boolean} async 是否异步请求（ 默认是异步）
  */
-export function ajax(
-    url: string | any, 
-    success?: Function, 
-    error?: Function, 
-    dataType?: "text" | "json", 
-    async: boolean = true
-) {
-    if (typeof url != 'string') {
-        success = url.success;
-        error = url.error;
-        dataType = url.dataType;
-        async = url.async;
-        url = url.url;
-    }
+export function ajax(option: AjaxOption) {
+    const {
+        url,
+        success, failure,
+        dataType,
+        async,
+        headers
+    } = option;
 
     let xhr: XMLHttpRequest;
     if (window.navigator.userAgent.indexOf('MSIE') > 0) {
@@ -40,11 +41,15 @@ export function ajax(
                 typeof (success) == 'function' && success(result);
             }
             else {
-                typeof (error) == 'function' && error(xhr.statusText);
+                typeof (failure) == 'function' && failure(xhr.statusText);
             }
         }
     };
     xhr.open('get', url, async === undefined ? true : async);
+    if (headers) {
+        for (let k in headers)
+            xhr.setRequestHeader(k, headers[k]);
+    }
     // xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
     xhr.send(null);
 }
@@ -73,4 +78,48 @@ export function getUrlArgs(url?: string) {
         }
         return map;
     }, Object.create(null));
+}
+
+export async function requestAsync<T = any>(option: AjaxOption, retryTimes: number = 3) {
+    const d = defer<T>();
+    let handler: number;
+    const doit = () => {
+        ajax({
+            url: option.url,
+            dataType: option.dataType,
+            async: option.async,
+            headers: option.headers,
+            success: function (response: any) {
+                if (handler) {
+                    clearInterval(handler);
+                    handler = null;
+                }
+                option.success&&option.success(response);
+                d.resolve(response as T);
+            },
+            failure: function (errMsg) {
+                if (retryTimes-- > 0)
+                    doit();
+                else {
+                    if (handler) {
+                        clearInterval(handler);
+                        handler = null;
+                    }
+                    option.failure&&option.failure(errMsg);
+                    d.reject(errMsg);
+                }
+            },
+        })
+    };
+
+    setTimeout(() => d.reject(new Error("http request timeout!")), 10000);
+
+    doit();
+
+    return d.promise;
+
+    // return Promise.race([
+    //     d.promise,
+    //     new Promise((_, reject) => handler = <any>setTimeout(() => reject(new Error("http request timeout!")), 10000))
+    // ]) as Promise<T>;
 }

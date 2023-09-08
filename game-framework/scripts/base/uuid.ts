@@ -1,15 +1,19 @@
+var crypto: Crypto;
+
 export function getUuid() {
-    if (typeof crypto === 'object') {
-        if (typeof crypto.randomUUID === 'function') {
-            return crypto.randomUUID();
+    if (crypto != void 0) {
+        if (typeof crypto === 'object') {
+            if (typeof crypto.randomUUID === 'function') {
+                return crypto.randomUUID();
+            }
         }
-    }
-    if (typeof crypto.getRandomValues === 'function' && typeof Uint8Array === 'function') {
-        const callback = (c) => {
-            const num = Number(c);
-            return (num ^ (crypto.getRandomValues(new Uint8Array(1)))[0] & (15 >> (num / 4))).toString(16);
-        };
-        return (''+1e7 + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, callback);
+        if (typeof crypto.getRandomValues === 'function' && typeof Uint8Array === 'function') {
+            const callback = (c) => {
+                const num = Number(c);
+                return (num ^ (crypto.getRandomValues(new Uint8Array(1)))[0] & (15 >> (num / 4))).toString(16);
+            };
+            return (''+1e7 + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, callback);
+        }
     }
 
     let timestamp = new Date().getTime();

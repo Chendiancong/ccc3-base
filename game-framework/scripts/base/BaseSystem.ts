@@ -4,26 +4,33 @@ import { TimerClass } from "../timer/TimerClass";
 import { applyMixins } from "./jsUtil";
 
 export class BaseSystem extends EventTarget {
-    
+
+    name: string = "";
+
     _priority: number = 0;
     _inited: boolean = false;
     _observed = [];
     _schedulers = [];
-    
-    init?(): void; 
+    _conditionTypes = [];
+
+    /** 只为初始化游戏准备 */
+    preInit?(): void;
+
+    init?(): void;
 
     reconnect?(): void;
-    
+
     protected onDispose() {
-        
+
     }
-    
+
     dispose() {
         this.onDispose();
         this.removeObserves();
         this.removeSchedulers();
+        Net.targetOff(this);
     }
 }
 
-export interface BaseSystem extends ObserverClass, TimerClass {}
+export interface BaseSystem extends ObserverClass, TimerClass { }
 applyMixins(BaseSystem, [ObserverClass, TimerClass]);
