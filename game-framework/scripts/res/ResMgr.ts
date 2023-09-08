@@ -36,7 +36,7 @@ function promisefy(fn: Function) {
 let aloadBundle = promisefy(assetManager.loadBundle.bind(assetManager));
 
 export class ResMgr {
-    bundles: { [name: string]: AssetManager.Bundle } = {};
+    bundles: Record<string, AssetManager.Bundle> = Object.create(null);
     defaultBundle: AssetManager.Bundle = resources;
 
     async aloadBundle(bundleName: string) {

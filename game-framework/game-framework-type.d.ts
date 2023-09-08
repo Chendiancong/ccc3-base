@@ -9,6 +9,7 @@ declare namespace gFramework {
     //type defines
 
     //usable fields
+    export const resMgr: import('../game-framework/scripts/res/ResMgr').ResMgr;
     export const systemMgr: typeof import("../game-framework/scripts/base/SystemMgr").systemMgr;
     export const net: typeof import("../game-framework/scripts/net/GameNet");
     export const timerCenter: import("../game-framework/scripts/timer/PriorityTimer").PriorityTimer;

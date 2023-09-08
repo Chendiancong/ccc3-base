@@ -172,8 +172,7 @@ export class AudioManager extends Component {
     }
 
     private async _loadClip(option: PlayAudioOption) {
-        const bundle = gFramework.resMgr.getBundle(option.bundleName)??null;
-        return await gFramework.resMgr.aloadRes(option.url, AudioClip, bundle);
+        return (await gFramework.resMgr.aloadRes(option.url, AudioClip, option.bundleName))[0];
     }
 
     private _onVolumeScale(old: number, cur: number) {

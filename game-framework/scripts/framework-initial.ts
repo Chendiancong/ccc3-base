@@ -4,6 +4,7 @@ import { getGlobal } from "./base/base";
 import * as debugUtil from "./base/debugUtil";
 import { systemMgr } from "./base/SystemMgr";
 import * as net from "./net/GameNet";
+import { ResMgr } from "./res/ResMgr";
 import { timerCenter } from "./timer/TimerCenter";
 import { AsyncWaiter } from "./utils/AsyncWaiter";
 import { CommonStorage, WechatStorage } from "./utils/GameLocalStorage";
@@ -14,6 +15,7 @@ export function initGameFramework() {
     const gf = global.gFramework;
     // gf.resMgr = new ResMgr();
     // gf.layerMgr = new LayerMgr();
+    gf.resMgr = new ResMgr();
     gf.systemMgr = systemMgr;
     getGlobal().Net = gf.net = net;
     gf.timerCenter = timerCenter;
