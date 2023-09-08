@@ -1,0 +1,1 @@
+declare type Constructor<T = any> = { new(...args): T };
