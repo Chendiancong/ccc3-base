@@ -3,11 +3,13 @@ class _funLinker {
     next: _funLinker = null;
     prev: _funLinker = null;
     thiz: any = null;
+    times: number = 0;
 }
 
 export interface IDelegate<FunType extends Function> {
     get entry(): FunType;
     add(f: FunType, thiz?: any);
+    addOnce(f: FunType, thiz?: any);
     remove(f: FunType, thiz?: any);
     clear();
 }
@@ -22,17 +24,24 @@ export class Delegate<FunType extends Function> implements IDelegate<FunType> {
     }
 
     constructor() {
+        const me = this;
         const fl = new _funLinker;
         fl.value = function() {
             let cur = fl.next;
             while (cur != this._tail) {
+                let next = cur.next;
                 if (typeof cur.value == "function") {
                     if (cur.thiz != void 0)
                         cur.value.call(cur.thiz, ...arguments);
                     else
                         cur.value(...arguments);
                 }
-                cur = cur.next;
+                if (cur.times > 0) {
+                    if (Math.max(0, --cur.times) == 0) {
+                        me.remove(<FunType>cur.value, cur.thiz);
+                    }
+                }
+                cur = next;
             }
         }
         this._head = fl;
@@ -46,7 +55,7 @@ export class Delegate<FunType extends Function> implements IDelegate<FunType> {
         thiz = thiz === undefined ? null : thiz;
         while (cur != this._tail) {
             if (cur.value === f && thiz === cur.thiz)
-                return;
+                return null;
             cur = cur.next;
         }
         const linker = new _funLinker;
@@ -57,6 +66,14 @@ export class Delegate<FunType extends Function> implements IDelegate<FunType> {
         linker.prev = prev;
         linker.next = this._tail;
         this._tail.prev = linker;
+        return linker;
+    }
+
+    addOnce(f: FunType, thiz?: any) {
+        const linker = this.add(f, thiz);
+        if (linker)
+            linker.times = 1;
+        return linker;
     }
 
     remove(f: FunType, thiz?: any) {

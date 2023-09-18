@@ -7,6 +7,7 @@ export class ObjectPool<T extends gFramework.IPoolItem> {
     private _totalCreated: number = 0;
     private _expireMs: number = 0;
     private _lastUseMs: number = 0;
+    private _noManage: boolean = false;
     private _ctor: (...args: any[]) => T;
     private _ctorArgs: () => any[];
     private _reuseArgs: () => any[];
@@ -28,9 +29,13 @@ export class ObjectPool<T extends gFramework.IPoolItem> {
      * 创建一个特定的池，并进行记录
      */
     static create<T extends gFramework.IPoolItem>(option: gFramework.ObjectPoolOption<T>, poolKey?: string) {
-        poolKey = poolKey ?? `autoPoolId_${this._autoPoolId}`;
-        const pool = this._allPools[poolKey] = new ObjectPool(option);
+        const pool = new ObjectPool(option);
+        if (!option.noManage) {
+            poolKey = poolKey ?? `autoPoolId_${this._autoPoolId++}`;
+            this._allPools[poolKey] = pool;
+        }
         pool._expireMs = option.expireMs ?? 0;
+        pool._noManage = option.noManage ?? false;
         pool._whenUse();
         if (pool._expireMs > 0)
             this._managedPools.push(pool);

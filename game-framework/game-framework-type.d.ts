@@ -43,6 +43,8 @@ declare namespace gFramework {
     export type ObjectPoolOption<T extends IPoolItem> = {
         /** 对象池有效时间，毫秒，5000的倍数，对象池多长时间后没有被使用则进行清除，默认为0，<=0为永远不清除 */
         expireMs?: number;
+        /** 是否不受管理器控制，这意味着ObjectPool中的一些全局控制的方法对其无效 */
+        noManage?: boolean;
         /** 创建函数 */
         ctor: () => T;
         /** 创建时参数获取 */
