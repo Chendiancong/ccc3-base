@@ -1,7 +1,7 @@
-import { AudioClip, EventTarget } from "cc";
+import { EventTarget } from "cc";
 import { WECHAT } from "cc/env";
 import { getGlobal } from "./base/base";
-import * as debugUtil from "./base/debugUtil";
+import { debugUtil } from "./base/debugUtil";
 import { systemMgr } from "./base/SystemMgr";
 import * as net from "./net/GameNet";
 import { ResMgr } from "./res/ResMgr";
@@ -13,8 +13,6 @@ import { CommonStorage, WechatStorage } from "./utils/GameLocalStorage";
 export function initGameFramework() {
     const global = getGlobal();
     const gf = global.gFramework;
-    // gf.resMgr = new ResMgr();
-    // gf.layerMgr = new LayerMgr();
     gf.resMgr = new ResMgr();
     gf.systemMgr = systemMgr;
     getGlobal().Net = gf.net = net;
@@ -27,7 +25,7 @@ export function initGameFramework() {
     gf.waiter = new AsyncWaiter();
 
     gf.log = debugUtil.log;
-    gf.forceLog = debugUtil.force_log;
+    gf.forceLog = debugUtil.forceLog;
     gf.warn = debugUtil.warn;
     gf.error = debugUtil.error;
     gf.assert = debugUtil.assert;
